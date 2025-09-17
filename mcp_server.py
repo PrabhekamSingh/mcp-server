@@ -12,8 +12,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 import httpx
-from mcp.server.fastmcp import FastMCP
-from mcp.types import TextContent, ImageContent
+from loguru import logger
+from fastmcp import FastMCP
+
+# from mcp.types import TextContent, ImageContent
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -62,6 +64,59 @@ def create_file(filename: str, content: str) -> Dict[str, Any]:
         return {
             "success": False,
             "error": f"Failed to create file: {str(e)}"
+        }
+
+
+@mcp.tool()
+async def get_pep8_coding_styles() -> Dict[str, Any]:
+    """
+    Fetch the main PEP8 coding style guidelines for Python by scraping the official PEP8 page.
+
+    Returns:
+        Dictionary with a summary of PEP8 style rules and a reference link.
+    """
+    import httpx
+    from bs4 import BeautifulSoup
+
+    url = "https://peps.python.org/pep-0008/"
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, "html.parser")
+
+            # Extract main sections and their summaries
+            pep8_sections = {}
+            for section in soup.select("section[id]"):
+                title = section.find("h2")
+                if not title:
+                    continue
+                section_title = title.get_text(strip=True)
+                # Get the first paragraph or list after the title
+                summary = ""
+                next_elem = title.find_next_sibling()
+                while next_elem and not summary:
+                    if next_elem.name == "p":
+                        summary = next_elem.get_text(strip=True)
+                    elif next_elem.name == "ul":
+                        summary = "; ".join(li.get_text(strip=True) for li in next_elem.find_all("li"))
+                    next_elem = next_elem.find_next_sibling()
+                if summary:
+                    pep8_sections[section_title] = summary
+
+            # Only keep the most relevant sections (optional: limit to top 10)
+            main_sections = dict(list(pep8_sections.items())[:10])
+
+            return {
+                "success": True,
+                "pep8_guidelines": main_sections,
+                "reference": url
+            }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Failed to fetch or parse PEP8: {str(e)}",
+            "reference": url 
         }
 
 @mcp.tool()
@@ -213,48 +268,6 @@ async def get_weather(city: str) -> Dict[str, Any]:
             "note": "Demo data - API key needed for real data"
         }
 
-@mcp.tool()
-async def get_random_quote() -> Dict[str, Any]:
-    """Get a random inspirational quote.
-    
-    Returns:
-        Dictionary with quote and author
-    """
-    try:
-        url = "https://api.quotable.io/random"
-        
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url)
-            
-            if response.status_code == 200:
-                data = response.json()
-                return {
-                    "success": True,
-                    "quote": data.get("content"),
-                    "author": data.get("author"),
-                    "tags": data.get("tags", [])
-                }
-            else:
-                return {
-                    "success": False,
-                    "error": f"Quote API error: {response.status_code}"
-                }
-    except Exception as e:
-        # Fallback quotes
-        quotes = [
-            {"quote": "The only way to do great work is to love what you do.", "author": "Steve Jobs"},
-            {"quote": "Innovation distinguishes between a leader and a follower.", "author": "Steve Jobs"},
-            {"quote": "Life is what happens to you while you're busy making other plans.", "author": "John Lennon"}
-        ]
-        import random
-        selected = random.choice(quotes)
-        return {
-            "success": True,
-            "quote": selected["quote"],
-            "author": selected["author"],
-            "note": "Fallback quote - API unavailable"
-        }
-
 # Data processing tools
 @mcp.tool()
 def process_json_data(json_string: str) -> Dict[str, Any]:
@@ -356,34 +369,13 @@ def data_analysis_prompt(data_type: str, objective: str) -> str:
     Make your analysis thorough but accessible to non-experts.
     """
 
-@mcp.prompt()
-def api_integration_prompt(api_name: str, use_case: str) -> str:
-    """Generate an API integration prompt.
-    
-    Args:
-        api_name: Name of the API to integrate
-        use_case: Specific use case or goal
-    """
-    return f"""
-    You are an API integration specialist. Please provide guidance for integrating {api_name} API for the following use case: {use_case}
-    
-    Please include:
-    1. Authentication requirements
-    2. Rate limiting considerations
-    3. Error handling strategies
-    4. Data transformation needs
-    5. Testing approaches
-    6. Security best practices
-    
-    Provide practical, production-ready advice.
-    """
 
-async def main():
+def run_main():
     """Main function to run the advanced MCP server."""
     try:
         logger.info("Starting Advanced MCP server...")
         logger.info(f"Workspace directory: {WORK_DIR}")
-        await mcp.run()
+        mcp.run(transport="http")
     except KeyboardInterrupt:
         logger.info("Server shutdown requested")
     except Exception as e:
@@ -391,4 +383,4 @@ async def main():
         raise
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    run_main()
